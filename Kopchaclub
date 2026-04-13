@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Kopcha Club - Admin Panel</title>
+
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;500;700&display=swap" rel="stylesheet">
+    
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-auth-js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-js"></script>
+
+    <style>
+        body {
+            margin: 0;
+            font-family: 'Poppins', sans-serif;
+            background: #0b1220;
+            color: white;
+            text-align: center;
+        }
+        header {
+            padding: 20px;
+            background: #020617;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.5);
+            margin-bottom: 30px;
+        }
+        .container {
+            max-width: 800px;
+            margin: auto;
+            padding: 20px;
+        }
+        input {
+            padding: 12px;
+            margin: 10px;
+            border: 1px solid #334155;
+            border-radius: 8px;
+            width: 280px;
+            background: #1e293b;
+            color: white;
+        }
+        button {
+            padding: 12px 25px;
+            border: none;
+            background: #3b82f6;
+            color: white;
+            border-radius: 8px;
+            cursor: pointer;
+            font-weight: 500;
+            transition: 0.3s;
+        }
+        button:hover {
+            background: #2563eb;
+        }
+        #msg {
+            margin-top: 15px;
+            font-weight: bold;
+            color: #fbbf24;
+        }
+        #dashboard {
+            margin-top: 40px;
+            background: #1e293b;
+            padding: 20px;
+            border-radius: 12px;
+        }
+        table {
+            width: 100%;
+            margin-top: 20px;
+            border-collapse: collapse;
+        }
+        td, th {
+            border: 1px solid #334155;
+            padding: 12px;
+        }
+        th {
+            background: #334155;
+        }
+        canvas {
+            max-height: 300px;
+            margin-bottom: 30px;
+        }
+    </style>
+</head>
+<body>
+
+<header>
+    <h2>Kopcha Club Admin</h2>
+</header>
+
+<div class="container">
+    <div id="auth-section">
+        <h3>Login / Signup</h3>
+        <input id="email" type="email" placeholder="Email Address"><br>
+        <input id="password" type="password" placeholder="Password"><br>
+        <button onclick="signup()">Signup</button>
+        <button onclick="login()">Login</button>
+        <p id="msg"></p>
+    </div>
+
+    <div id="dashboard" style="display:none">
+        <h3>Dashboard Statistics</h3>
+        <p>Total Registered Users: <span id="totalUsers" style="font-size: 1.5em; color: #3b82f6;">0</span></p>
+        
+        <canvas id="chart"></canvas>
+
+        <table>
+            <thead>
+                <tr>
+                    <th>User Email</th>
+                    <th>Role</th>
+                </tr>
+            </thead>
+            <tbody id="usersList"></tbody>
+        </table>
+    </div>
+</div>
+
+<script>
+    // Firebase configuration with your provided keys
+    const firebaseConfig = {
+        apiKey: "YOUR_API_KEY",
+        authDomain: "YOUR_PROJECT.firebaseapp.com",
+        projectId: "YOUR_PROJECT_ID"
+    };
+
+    // Initialize Firebase
+    firebase.initializeApp(firebaseConfig);
+    const auth = firebase.auth();
+    const db = firebase.firestore();
+
+    function msg(t) {
+        document.getElementById("msg").innerText = t;
+    }
+
+    // --- Signup Function ---
+    function signup() {
+        let e = document.getElementById("email").value;
+        let p = document.getElementById("password").value;
+
+        if(!e || !p) return msg("Fields cannot be empty");
+
+        auth.createUserWithEmailAndPassword(e, p).then(async res => {
+            await res.user.sendEmailVerification();
+
+            // Store user info in Firestore
+            await db.collection("users").doc(res.user.uid).set({
+                email: e,
+                role: "user", // Default role is user
+                createdAt: new Date()
+            });
+
+            msg("Verification link sent! Check your email.");
+        }).catch(err => msg(err.message));
+    }
+
+    // --- Login Function ---
+    function login() {
+        let e = document.getElementById("email").value;
+        let p = document.getElementById("password").value;
+
+        auth.signInWithEmailAndPassword(e, p).then(async res => {
+            if (!res.user.emailVerified) {
+                msg("Please verify your email first!");
+                return;
+            }
+
+            // Check if user is Admin
+            let doc = await db.collection("users").doc(res.user.uid).get();
+            
+            if (!doc.exists || doc.data().role !== "admin") {
+                msg("Access Denied: You are not an Admin.");
+                return;
+            }
+
+            // If Admin, show dashboard
+            document.getElementById("auth-section").style.display = "none";
+            document.getElementById("dashboard").style.display = "block";
+            loadUsers();
+        }).catch(err => msg(err.message));
+    }
+
+    // --- Load Users for Dashboard ---
+    function loadUsers() {
+        db.collection("users").get().then(snap => {
+            let count = 0;
+            let labels = [];
+            let dataPoints = [];
+            const usersTable = document.getElementById("usersList");
+            
+            usersTable.innerHTML = "";
+            
+            snap.forEach(doc => {
+                let data = doc.data();
+                count++;
+                labels.push(count);
+                dataPoints.push(count);
+                
+                usersTable.innerHTML += `
+                    <tr>
+                        <td>${data.email}</td>
+                        <td>${data.role}</td>
+                    </tr>`;
+            });
+
+            document.getElementById("totalUsers").innerText = count;
+
+            // Initialize Chart
+            const ctx = document.getElementById('chart').getContext('2d');
+            new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        label: 'User Count',
+                        data: dataPoints,
+                        borderColor: '#3b82f6',
+                        backgroundColor: 'rgba(59, 130, 246, 0.2)',
+                        fill: true,
+                        tension: 0.4
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    plugins: { legend: { display: false } }
+                }
+            });
+        });
+    }
+</script>
+
+</body>
+</html>
